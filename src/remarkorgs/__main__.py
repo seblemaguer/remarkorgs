@@ -26,7 +26,7 @@ except Exception:
     JSON_LOGGER = False
 
 # remarks helper
-from remarkorgs.remarks_reboot import run_remarks
+from remarkorgs.remarks_reboot import Remarks
 
 ###############################################################################
 # global constants
@@ -158,7 +158,8 @@ def main():
         output_dir.mkdir(parents=True, exist_ok=True)
 
     # Run remarks (from remarks_reboot)
-    run_remarks(input_dir, output_dir, override=args.override)
+    remarks = Remarks()
+    remarks.run(input_dir, output_dir, override=args.override)
 
 ###############################################################################
 # Wrapping for directly calling the scripts
