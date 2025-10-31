@@ -123,6 +123,14 @@ def define_argument_parser() -> argparse.ArgumentParser:
         help="increase output verbosity",
     )
 
+    # Add performative options
+    parser.add_argument(
+        "-O",
+        "--override",
+        action="store_true",
+        help="Override existing files (/!\\ use at your own risk!)"
+    )
+
     # Add arguments
     parser.add_argument("input_dir", help="xochitl directory sync from the remarkable")
     parser.add_argument("output_dir", help="base directory which will contains all the extract files")
@@ -150,7 +158,7 @@ def main():
         output_dir.mkdir(parents=True, exist_ok=True)
 
     # Run remarks (from remarks_reboot)
-    run_remarks(input_dir, output_dir)
+    run_remarks(input_dir, output_dir, override=args.override)
 
 ###############################################################################
 # Wrapping for directly calling the scripts

@@ -30,7 +30,7 @@ from remarks.warnings import scrybble_warning_only_v6_supported
 from .output.org import OrgSerializer
 
 
-def run_remarks(input_dir: pathlib.Path, output_dir: pathlib.Path):
+def run_remarks(input_dir: pathlib.Path, output_dir: pathlib.Path, override:bool=False):
     if input_dir.name.endswith(".rmn") or input_dir.name.endswith(".rmdoc"):
         temp_dir = tempfile.mkdtemp()
         with zipfile.ZipFile(input_dir, "r") as zip_ref:
@@ -70,7 +70,7 @@ def run_remarks(input_dir: pathlib.Path, output_dir: pathlib.Path):
             in_device_dir = get_ui_path(metadata_path)
             relative_doc_path = pathlib.Path(f"{in_device_dir}/{doc_name}")
 
-            process_document(metadata_path, relative_doc_path, output_dir)
+            process_document(metadata_path, relative_doc_path, output_dir, override)
         else:
             logging.info(
                 f'\nFile skipped: "{doc_name}" ({metadata_path.stem}) due to unsupported filetype: {doc_type}. remarks only supports: {", ".join(supported_types)}'
@@ -85,6 +85,7 @@ def process_document(
     metadata_path: pathlib.Path,
     relative_doc_path: pathlib.Path,
     output_dir: pathlib.Path,
+    override: bool=False,
 ):
 
     document = Document(metadata_path)
@@ -195,9 +196,18 @@ def process_document(
         else:
             scrybble_warning_only_v6_supported.render_as_annotation(page)
 
-    output_pdf_path = output_dir / f"{relative_doc_path}.pdf"
-    output_pdf_path.parent.mkdir(parents=True, exist_ok=True)
-    rmc_pdf_src.save(output_pdf_path)
 
-    output_org_path = output_dir / f"{relative_doc_path}"
-    org_serializer.save(output_org_path)
+    output_path = output_dir/relative_doc_path
+    if output_path.exists():
+        if override:
+            output_path.unlink()
+        else:
+            raise Exception(f"{output_path} already exists and override is not activated")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.suffix == ".pdf":
+        rmc_pdf_src.save(output_path)
+    else:
+        rmc_pdf_src.save(f"{output_path.resolve()}.pdf")
+
+    org_serializer.save(output_path.with_suffix(".org"))
