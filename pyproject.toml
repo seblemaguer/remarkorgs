@@ -1,0 +1,63 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = [
+  "setuptools>=61",
+]
+
+[project]
+name = "remarkorgs"
+version = "0.0.1"
+description = "A wrapper around remarks to export "
+readme = {file="README.md", content-type = "text/markdown"}
+authors = [
+   {name="Sébastien Le Maguer", email="sebastien.lemaguer@helsinki.fi"}
+]
+maintainers = [
+   {name="Sébastien Le Maguer", email="sebastien.lemaguer@helsinki.fi"}
+]
+keywords = []
+requires-python = ">=3.11"
+license = "EUPL-1.2"
+classifiers = [
+]
+dependencies = [
+]
+[project.optional-dependencies]
+dev = [
+  "pre-commit",
+  "black",
+  "basedpyright"
+]
+test = [
+  "selenium",
+]
+[project.urls]
+Homepage = "https://github.com/seblemaguer/remarkorgs"
+Issues = "https://github.com/seblemaguer/remarkorgs/issues"
+git = "https://github.com/seblemaguer/remarkorgs.git"
+[project.scripts]
+remarkorgs = "remarkorgs.__main__:main"
+
+[tool.setuptools.package-data]
+remarkorgs = ["**/templates/**/*.*"]  # FIXME: this is a bit hardcore here
+
+[tool.black]
+line-length = 120
+target-version = ['py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+  \.toml
+  |\.sh
+  |\.git
+  |\.ini
+  |Dockerfile
+  |Jenkinfile
+)/
+'''
+
+[tool.flake8]
+max-line-length = 120
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
