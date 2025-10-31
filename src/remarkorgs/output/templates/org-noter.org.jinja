@@ -3,37 +3,37 @@
 :NOTER_DOCUMENT: {{ document.name }}
 :END:
 
-{%- if pages %}
+** Overview
 
+** Detailed notes
+
+{%- if pages %}
 {%- for index, page in sorted_pages %}
-** page {{ index + 1 }}
+*** page {{ index + 1 }}
 :PROPERTIES:
 :NOTER_PAGE: {{ index + 1 }}
 :END:
 
 {%- if page.tags %}
-*** Tags
+**** Tags
 {%- for tag in page.tags %}
   - {{ tag }}
 {%- endfor %}
-{%- endif %}
+{% endif %}
 
 {%- if page.highlights %}
-
-*** Highlights
-{% for highlight in page.highlights %}
+**** Highlights
+{%- for highlight in page.highlights %}
   - {{ highlight.text }}
 {%- endfor %}
-
-{%- endif %}
+{% endif %}
 
 {%- if page.text %}
-
-*** Typed text
+**** Typed text
 {%- for paragraph in page.text %}
 {{ render_paragraph(paragraph) }}
-{% endfor %}
-{%- endif %}
+{%- endfor %}
+{% endif %}
 
-{% endfor %}
+{%- endfor %}
 {%- endif %}
