@@ -8,9 +8,11 @@ import tempfile
 import zipfile
 
 import fitz  # PyMuPDF
+from fitz import Page, Rect, Annot, Quad
+
+from rmscene.scene_items import PenColor
 from rmc.exporters.pdf import rm_to_pdf
-from rmc.exporters.svg import build_anchor_pos, get_bounding_box
-from rmc.exporters.svg import rm_to_svg, xx, yy
+from rmc.exporters.svg import build_anchor_pos, get_bounding_box, set_device, set_dimensions_for_pdf, rmc_config
 
 from remarks.Document import Document
 from remarks.conversion.parsing import (
@@ -18,7 +20,6 @@ from remarks.conversion.parsing import (
     read_rm_file_version,
 )
 from remarks.metadata import ReMarkableAnnotationsFileHeaderVersion
-from remarks.output.PdfFile import apply_smart_highlight, add_error_annotation
 from remarks.utils import (
     is_document,
     get_document_filetype,
@@ -26,8 +27,87 @@ from remarks.utils import (
     get_ui_path,
 )
 from remarks.warnings import scrybble_warning_only_v6_supported
+from remarks.output.PdfFile import add_error_annotation
+from remarks.conversion.parsing import RemarksRectangle
 
 from .output.org import OrgSerializer
+
+HARDCODED_COLORMAP = {
+    (245, 206, 39, 255): PenColor.HIGHLIGHT_YELLOW,
+    (39, 155, 245, 255): PenColor.HIGHLIGHT_BLUE,
+    (228, 39, 245, 255): PenColor.HIGHLIGHT_PINK,
+    (245, 142, 39, 255): PenColor.HIGHLIGHT_ORANGE,
+    (19, 151, 7, 255): PenColor.HIGHLIGHT_GREEN,
+    (199, 199, 198, 255): PenColor.HIGHLIGHT_GRAY,
+    (33, 30, 28, 64): PenColor.SHADER_GRAY,
+    (254, 178, 0, 115): PenColor.SHADER_ORANGE,
+    (192, 127, 210, 128): PenColor.SHADER_MAGENTA,
+    (48, 74, 224, 77): PenColor.SHADER_BLUE,
+    (194, 49, 50, 102): PenColor.SHADER_RED,
+    (145, 218, 113, 128): PenColor.SHADER_GREEN,
+    (250, 231, 25, 115): PenColor.SHADER_YELLOW,
+    (116, 210, 232, 102): PenColor.SHADER_CYAN,
+}
+
+
+HARDCODED_COLORMAP = {
+    (19, 151, 7, 255): PenColor.HIGHLIGHT_YELLOW,
+    (19, 151, 7, 255): PenColor.HIGHLIGHT_BLUE,
+    (19, 151, 7, 255): PenColor.HIGHLIGHT_PINK,
+    (19, 151, 7, 255): PenColor.HIGHLIGHT_ORANGE,
+    (19, 151, 7, 255): PenColor.HIGHLIGHT_GREEN,
+    (19, 151, 7, 255): PenColor.HIGHLIGHT_GRAY,
+    (19, 151, 7, 255): PenColor.SHADER_GRAY,
+    (19, 151, 7, 255): PenColor.SHADER_ORANGE,
+    (19, 151, 7, 255): PenColor.SHADER_MAGENTA,
+    (19, 151, 7, 255): PenColor.SHADER_BLUE,
+    (19, 151, 7, 255): PenColor.SHADER_GREEN,
+    (19, 151, 7, 255): PenColor.SHADER_YELLOW,
+    (19, 151, 7, 255): PenColor.SHADER_CYAN,
+}
+
+
+def get_highlight_color(pen_color: int) -> tuple[float, float, float]:
+    """Convert PenColor enum value to RGB tuple for PDF annotations.
+
+    Args:
+        pen_color: PenColor enum value from rmscene
+
+    Returns:
+        RGB tuple with values normalized to 0-1 range for PyMuPDF
+    """
+    # Create reverse mapping from PenColor to RGBA
+    color_to_rgba = {v: k for k, v in HARDCODED_COLORMAP.items()}
+
+    # Try to convert to PenColor enum, fall back to raw integer lookup
+    try:
+        pen_color_enum = PenColor(pen_color)
+        rgba = color_to_rgba.get(pen_color_enum, (19, 151, 7, 255))
+    except ValueError:
+        # If the color value is not a valid PenColor enum, use fallback
+        rgba = (19, 151, 7, 255)
+
+    # Convert to RGB (ignore alpha) and normalize to 0-1 range
+    r, g, b, _ = rgba
+    return (r / 255, g / 255, b / 255)
+
+
+def apply_smart_highlight(page: Page, highlight: RemarksRectangle, x_translation: float) -> None:
+    # Get the color for this highlight based on its PenColor value
+    highlight_color = get_highlight_color(highlight.color)
+    for rectangle in highlight.rectangles:
+        x, y, w, h = rectangle.x, rectangle.y, rectangle.w, rectangle.h
+        # Highlight rectangles are already in PDF coordinate space via xx/yy transformation
+        # x_translation positions them correctly relative to reMarkable's (0,0) at center-top of PDF
+        rect = Rect((x + x_translation, y), (x + x_translation + w, y + h))
+        try:
+            annot: Annot = page.add_highlight_annot(quads=rect)
+            # Use the dynamic color based on the highlight's actual color from the reMarkable file
+            annot.set_colors(stroke=highlight_color)
+            annot.set_opacity(0.3)
+            annot.update()
+        except ValueError:
+            logging.warning(f"Bad quads entry {rect}")
 
 
 class Remarks:
@@ -88,6 +168,7 @@ class Remarks:
         relative_doc_path: pathlib.Path,
         output_dir: pathlib.Path,
         override: bool = False,
+        device: str | None = None,
     ):
 
         document = Document(metadata_path)
@@ -95,45 +176,71 @@ class Remarks:
 
         org_serializer = OrgSerializer(document)
 
-        # First, add page tags for ALL pages (including those without .rm files)
-        for page_idx, page_uuid in enumerate(document.pages_list):
-            page_tags = document.get_page_tags_for_page(page_uuid)
-            if page_tags:
-                org_serializer.add_page_tags(page_idx, page_tags)
-
         for (
             page_uuid,
             page_idx,
             rm_annotation_file,
         ) in document.pages():
-            self._logger.debug(f"processing page {page_idx + 1}, {page_uuid}")
+            self._logger.info(f"processing page {page_idx + 1}, {page_uuid}")
             page = rmc_pdf_src[page_idx]
 
             rm_file_version = read_rm_file_version(rm_annotation_file)
 
             if rm_file_version == ReMarkableAnnotationsFileHeaderVersion.V6:
+                # Get PDF page dimensions BEFORE parsing to ensure correct SCALE is used
+                page_rotation = page.rotation
+                page.set_rotation(0)
+                w_bg, h_bg = page.cropbox.width, page.cropbox.height
+                if int(page_rotation) in [90, 270]:
+                    w_bg, h_bg = h_bg, w_bg
+                page.set_rotation(page_rotation)  # Restore rotation
+
+                # Set SVG dimensions: use PDF dimensions if there's backing content,
+                # otherwise use device setting for notebooks
+                has_backing_pdf = page.get_contents()
+                if has_backing_pdf:
+                    self._logger.info(f"Setting page dimensions based on pdf: {round(w_bg,2)} x {round(h_bg,2)}")
+                    set_dimensions_for_pdf(w_bg, h_bg)
+                elif device:
+                    self._logger.info(f"Setting page dimensions based on device: {device}")
+                    set_device(device)
+                else:
+                    self._logger.warning(
+                        f"Unknown device and no backing pdf: setting page size to RMPP (if this is incorrect, specify device with --device)"
+                    )
+                    set_device("RMPP")
+
                 (ann_data, has_ann_hl), version = parse_rm_file(rm_annotation_file)
                 temp_pdf = tempfile.NamedTemporaryFile(suffix=".pdf", mode="w", delete=False)
 
                 # This offset is used for smart highlights
                 highlights_x_translation = 0
                 try:
+
                     # convert the pdf
                     rm_to_pdf(rm_annotation_file, temp_pdf.name)
 
                     svg_pdf = fitz.open(temp_pdf.name)
 
                     # if the background page is not empty, need to merge svg on top of background page
-                    if page.get_contents():
-                        w_bg, h_bg = page.cropbox.width, page.cropbox.height
+                    if has_backing_pdf:
+                        # w_bg, h_bg already calculated above
                         # find the (top, right) coordinates of the svg
                         anchor_pos = build_anchor_pos(ann_data["scene_tree"].root_text)
-                        x_min, x_max, y_min, y_max = get_bounding_box(ann_data["scene_tree"].root, anchor_pos)
+                        # Convert PDF dimensions to screen coordinates for bounding box default
+                        # PDF uses points (72 DPI), screen uses device DPI; SCALE = 72/DPI
+                        # reMarkable uses center-top origin: x from -w/2 to w/2, y from 0 to h
+                        w_bg_screen = w_bg / rmc_config.scale
+                        h_bg_screen = h_bg / rmc_config.scale
+                        pdf_default_bounds = (-w_bg_screen / 2, w_bg_screen / 2, 0, h_bg_screen)
+                        x_min, x_max, y_min, y_max = get_bounding_box(
+                            ann_data["scene_tree"].root, anchor_pos, default=pdf_default_bounds
+                        )
                         x_shift, y_shift, w_svg, h_svg = (
-                            xx(x_min),
-                            yy(y_min),
-                            xx(x_max - x_min + 1),
-                            yy(y_max - y_min + 1),
+                            rmc_config.xx(x_min),
+                            rmc_config.yy(y_min),
+                            rmc_config.xx(x_max - x_min + 1),
+                            rmc_config.yy(y_max - y_min + 1),
                         )
 
                         # compute the width/height of a blank page that can contain both svg and background pdf
@@ -164,12 +271,9 @@ class Remarks:
                             fitz.Rect(x_bg, y_bg, x_bg + w_bg, y_bg + h_bg),
                             rmc_pdf_src,
                             page_idx,
+                            rotate=-page_rotation,
                         )
-                        page.show_pdf_page(
-                            fitz.Rect(x_svg, y_svg, x_svg + w_svg, y_svg + h_svg),
-                            svg_pdf,
-                            0,
-                        )
+                        page.show_pdf_page(fitz.Rect(x_svg, y_svg, x_svg + w_svg, y_svg + h_svg), svg_pdf, 0)
 
                         rmc_pdf_src.insert_pdf(doc, start_at=page_idx)
                     else:

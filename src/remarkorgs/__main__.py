@@ -19,8 +19,10 @@ import pathlib
 # Messaging/logging
 import logging
 from logging.config import dictConfig
+
 try:
     import pythonjsonlogger
+
     JSON_LOGGER = True
 except Exception:
     JSON_LOGGER = False
@@ -32,6 +34,7 @@ from remarkorgs.remarks_reboot import Remarks
 # global constants
 ###############################################################################
 LEVEL = [logging.WARNING, logging.INFO, logging.DEBUG]
+
 
 ###############################################################################
 # Functions
@@ -82,9 +85,9 @@ def configure_logger(args) -> logging.Logger:
         cur_formatter_key = "f"
         if JSON_LOGGER:
             logging_config["formatters"]["j"] = {
-                '()': 'pythonjsonlogger.json.JsonFormatter',
-                'fmt': '%(asctime)s %(levelname)s %(filename)s %(lineno)d %(message)s',
-                'rename_fields': {'asctime': 'time', 'levelname': 'level', 'lineno': 'line_number'}
+                "()": "pythonjsonlogger.json.JsonFormatter",
+                "fmt": "%(asctime)s %(levelname)s %(filename)s %(lineno)d %(message)s",
+                "rename_fields": {"asctime": "time", "levelname": "level", "lineno": "line_number"},
             }
             cur_formatter_key = "j"
 
@@ -111,7 +114,7 @@ def define_argument_parser() -> argparse.ArgumentParser:
     --------
     The argument parser: argparse.ArgumentParser
     """
-    parser = argparse.ArgumentParser(description="")
+    parser = argparse.ArgumentParser(description="Convert remarkable database to PDF and org-mode annotation files")
 
     # Add logging options
     parser.add_argument("-l", "--log_file", default=None, help="Logger file")
@@ -125,10 +128,7 @@ def define_argument_parser() -> argparse.ArgumentParser:
 
     # Add performative options
     parser.add_argument(
-        "-O",
-        "--override",
-        action="store_true",
-        help="Override existing files (/!\\ use at your own risk!)"
+        "-O", "--override", action="store_true", help="Override existing files (/!\\ use at your own risk!)"
     )
 
     # Add arguments
@@ -151,7 +151,7 @@ def main():
     # Initialise directories
     input_dir = pathlib.Path(args.input_dir)
     if not input_dir.exists():
-        parser.error(f'Directory "{input_dir}" does not exist')
+        arg_parser.error(f'Directory "{input_dir}" does not exist')
 
     output_dir = pathlib.Path(args.output_dir)
     if not output_dir.exists():
@@ -160,6 +160,7 @@ def main():
     # Run remarks (from remarks_reboot)
     remarks = Remarks()
     remarks.run(input_dir, output_dir, override=args.override)
+
 
 ###############################################################################
 # Wrapping for directly calling the scripts
